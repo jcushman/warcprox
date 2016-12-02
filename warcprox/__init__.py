@@ -134,6 +134,8 @@ import warcprox.dedup as dedup
 import warcprox.warcproxy as warcproxy
 import warcprox.mitmproxy as mitmproxy
 import warcprox.writer as writer
+import warcprox.warcsigner as warcsigner
+import warcprox.warcrecord as warcrecord
 import warcprox.warc as warc
 import warcprox.writerthread as writerthread
 import warcprox.stats as stats

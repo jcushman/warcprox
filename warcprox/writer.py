@@ -39,11 +39,23 @@ class WarcWriter:
         self.rollover_size = options.rollover_size or 1000000000
         self.rollover_idle_time = options.rollover_idle_time or None
         self._last_activity = time.time()
-
         self.gzip = options.gzip or False
-        digest_algorithm = options.digest_algorithm or 'sha1'
-        base32 = options.base32
-        self.record_builder = warcprox.warc.WarcRecordBuilder(digest_algorithm=digest_algorithm, base32=base32)
+
+        # set signer_class from options.signer_class (for use from code)
+        # or options.signature_algorithm (for use from command line)
+        if options.signer_class:
+            signer_class = options.signer_class
+        else:
+            signer_class = warcprox.warcsigner.signers.get(options.signature_algorithm or "ed25519")
+            if not signer_class:
+                raise NotImplementedError("Unknown signature algorithm: %s" % options.signature_algorithm)
+
+        self.record_builder = warcprox.warc.WarcRecordBuilder(
+            digest_algorithm=options.digest_algorithm or 'sha1',
+            base32=options.base32,
+            signer_class=signer_class,
+            signature_private_key=options.signature_private_key
+        )
 
         # warc path and filename stuff
         self.directory = options.directory or './warcs'

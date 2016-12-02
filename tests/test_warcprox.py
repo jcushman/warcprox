@@ -44,6 +44,9 @@ import traceback
 import signal
 from collections import Counter
 import socket
+import nacl.encoding
+import nacl.signing
+import nacl.exceptions
 
 try:
     import http.server as http_server
@@ -321,7 +324,11 @@ def service_registry(request, rethinkdb_servers):
         return None
 
 @pytest.fixture(scope="module")
-def warcprox_(request, captures_db, dedup_db, stats_db, service_registry):
+def signing_key():
+    return nacl.signing.SigningKey.generate().encode(encoder=nacl.encoding.HexEncoder)
+
+@pytest.fixture(scope="module")
+def warcprox_(request, captures_db, dedup_db, stats_db, service_registry, signing_key):
     f = tempfile.NamedTemporaryFile(prefix='warcprox-test-ca-', suffix='.pem', delete=True)
     f.close() # delete it, or CertificateAuthority will try to read it
     ca_file = f.name
@@ -331,7 +338,8 @@ def warcprox_(request, captures_db, dedup_db, stats_db, service_registry):
     recorded_url_q = queue.Queue()
 
     options = warcprox.Options(port=0, playback_port=0,
-            onion_tor_socks_proxy='localhost:9050')
+            onion_tor_socks_proxy='localhost:9050',
+            signature_private_key=signing_key)
     proxy = warcprox.warcproxy.WarcProxy(ca=ca, recorded_url_q=recorded_url_q,
             stats_db=stats_db, options=options)
     options.port = proxy.server_port
@@ -1144,6 +1152,48 @@ def test_missing_content_length(archiving_proxies, http_daemon, https_daemon):
     assert response.content == (
             b'This response is missing a Content-Length http header.')
     assert not 'content-length' in response.headers
+
+def test_signed_records(https_daemon, http_daemon, warcprox_, archiving_proxies, playback_proxies):
+    url = 'http://localhost:{}/m/n'.format(http_daemon.server_port)
+
+    # archive url
+    response = requests.get(url, proxies=archiving_proxies)
+    assert response.status_code == 200
+    assert response.headers['warcprox-test-header'] == 'm!'
+    assert response.content == b'I am the warcprox test payload! nnnnnnnnnn!\n'
+
+    # wait for writer thread to process
+    time.sleep(0.5)
+    while not warcprox_.warc_writer_thread.idle:
+        time.sleep(0.5)
+    time.sleep(0.5)
+
+    # close the warc
+    writer = warcprox_.warc_writer_thread.writer_pool.default_warc_writer
+    warc_path = os.path.join(writer.directory, writer._f_finalname)
+    writer.close_writer()
+    assert os.path.exists(warc_path)
+
+    # read the warc
+    fh = warcprox.warcrecord.SignedWarcRecord.open_archive(warc_path)
+    record_iter = fh.read_records(limit=None, offsets=True)
+    try:
+
+        # verify signature for each record
+        for record_type in (b'warcinfo', b'response', b'request'):
+            (offset, record, errors) = next(record_iter)
+
+            assert record.type == record_type
+            is_valid, error_message = record.verify_signature()
+            assert is_valid, "Record failed to validate: %s" % error_message
+
+            # signature should fail to verify if a header is modified
+            record.header_string += 'modified'
+            is_valid, error_message = record.verify_signature()
+            assert is_valid == False and error_message == "Signature does not validate."
+
+    finally:
+        fh.close()
 
 if __name__ == '__main__':
     pytest.main()

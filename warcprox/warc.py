@@ -22,6 +22,7 @@
 from __future__ import absolute_import
 
 import logging
+
 import warcprox
 import hashlib
 import socket
@@ -30,12 +31,19 @@ from hanzo import warctools
 import warcprox
 import datetime
 
+
 class WarcRecordBuilder:
     logger = logging.getLogger("warcprox.warc.WarcRecordBuilder")
 
-    def __init__(self, digest_algorithm="sha1", base32=False):
+    def __init__(self, digest_algorithm="sha1", base32=False, signer_class=None, signature_private_key=None, record_class=warcprox.warcrecord.SignedWarcRecord):
         self.digest_algorithm = digest_algorithm
         self.base32 = base32
+        self.record_class = record_class
+
+        self.signer = None
+        self.signature_private_key = signature_private_key
+        if signature_private_key:
+            self.signer = signer_class(private_key=signature_private_key)
 
     def _build_response_principal_record(self, recorded_url, warc_date):
         """Builds response or revisit record, whichever is appropriate."""
@@ -128,7 +136,7 @@ class WarcRecordBuilder:
                     warcprox.digest_str(recorder.payload_digest, self.base32)))
 
             recorder.tempfile.seek(0)
-            record = warctools.WarcRecord(headers=headers, content_file=recorder.tempfile)
+            record = self.record_class(headers=headers, content_file=recorder.tempfile, signer=self.signer)
 
         else:
             headers.append((warctools.WarcRecord.CONTENT_LENGTH, str(len(data)).encode('latin1')))
@@ -140,7 +148,7 @@ class WarcRecordBuilder:
                                 warcprox.digest_str(digest, self.base32)))
 
             content_tuple = content_type, data
-            record = warctools.WarcRecord(headers=headers, content=content_tuple)
+            record = self.record_class(headers=headers, content=content_tuple, signer=self.signer)
 
         return record
 
@@ -165,7 +173,6 @@ class WarcRecordBuilder:
         # warcinfo_fields.append('isPartOf: {0}'.format(self.is_part_of))
         data = b'\r\n'.join(warcinfo_fields) + b'\r\n'
 
-        record = warctools.WarcRecord(headers=headers, content=(b'application/warc-fields', data))
+        record = self.record_class(headers=headers, content=(b'application/warc-fields', data), signer=self.signer)
 
         return record
-

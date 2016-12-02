@@ -106,6 +106,10 @@ def _build_arg_parser(prog=os.path.basename(sys.argv[0])):
             help=argparse.SUPPRESS)
     arg_parser.add_argument('--onion-tor-socks-proxy', dest='onion_tor_socks_proxy',
             default=None, help='host:port of tor socks proxy, used only to connect to .onion sites')
+    arg_parser.add_argument('--signature-private-key', dest='signature_private_key',
+            default=None, help='if specified, used to sign warc records')
+    arg_parser.add_argument('--signature-algorithm', dest='signature_algorithm',
+            default='ed25519', help='algorithm to sign warc records, used only if --signature-private-key is specified')
     arg_parser.add_argument('--version', action='version',
             version="warcprox {}".format(warcprox.__version__))
     arg_parser.add_argument('-v', '--verbose', dest='verbose', action='store_true')
